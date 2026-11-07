@@ -1,5 +1,5 @@
 
-name: Activity Graph
+name: Generate Animated Contribution Graph
 
 on:
   schedule:
@@ -9,23 +9,87 @@ on:
 permissions:
   contents: write
 
-# Prevent two graph-generation runs from pushing simultaneously.
 concurrency:
-  group: activity-graph-${{ github.ref }}
+  group: activity-graph-main
   cancel-in-progress: false
 
 jobs:
-  activity-graph:
+  generate:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout latest repository
+      - name: Checkout latest main
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
-      - name: Generate animated contribution graph
+      - name: Generate contribution graph
         uses: alexcerezo/activity-graph@v1
         with:
           username: YASVANTHKUMAR23
           token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Synchronize and push generated files
+        shell: bash
+        run: |
+          set -e
+
+          # Save generated graph files outside the Git working tree
+          mkdir -p /tmp/activity-graph
+          cp activity-graph.svg activity-graph-mobile.svg /tmp/activity-graph/
+
+          # Remove the action's local commit, preserving generated files
+          git reset --mixed origin/main
+
+          # Restore generated files
+          cp /tmp/activity-graph/activity-graph.svg .
+          cp /tmp/activity-graph/activity-graph-mobile.svg .
+
+          # Regenerate README from the latest remote version
+          git checkout origin/main -- README.md
+
+          # Inject generated graph into latest README
+          python3 - <<'PY'
+          from pathlib import Path
+
+          readme = Path("README.md")
+          content = readme.read_text(encoding="utf-8")
+
+          start = "<!-- BEGIN ACTIVITY-GRAPH -->"
+          end = "<!-- END ACTIVITY-GRAPH -->"
+
+          if start not in content or end not in content:
+              raise SystemExit("Activity graph markers missing from README")
+
+          graph = """<!-- BEGIN ACTIVITY-GRAPH -->
+          <picture>
+            <source media="(max-width: 600px)" srcset="./activity-graph-mobile.svg">
+            <img src="./activity-graph.svg" width="100%" alt="Animated GitHub contribution graph">
+          </picture>
+          <!-- END ACTIVITY-GRAPH -->"""
+
+          before, remainder = content.split(start, 1)
+          _, after = remainder.split(end, 1)
+
+          readme.write_text(before + graph + after, encoding="utf-8")
+          PY
+
+          # Commit only if generated content changed
+          git add README.md activity-graph.svg activity-graph-mobile.svg
+
+          if git diff --cached --quiet; then
+            echo "No graph changes to commit."
+            exit 0
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git commit -m "chore: update animated contribution graph [skip ci]"
+
+          # Fetch again and rebase if main changed during generation
+          git fetch origin main
+          git rebase origin/main
+
+          git push origin HEAD:main
