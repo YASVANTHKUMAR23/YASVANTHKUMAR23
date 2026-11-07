@@ -1,5 +1,5 @@
 
-name: Generate Animated Contribution Graph
+name: Activity Graph
 
 on:
   schedule:
@@ -9,12 +9,23 @@ on:
 permissions:
   contents: write
 
+# Prevent two graph-generation runs from pushing simultaneously.
+concurrency:
+  group: activity-graph-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   activity-graph:
     runs-on: ubuntu-latest
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
-      - name: Generate animated graph
+    steps:
+      - name: Checkout latest repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate animated contribution graph
         uses: alexcerezo/activity-graph@v1
+        with:
+          username: YASVANTHKUMAR23
+          token: ${{ secrets.GITHUB_TOKEN }}
